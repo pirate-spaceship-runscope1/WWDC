@@ -192,11 +192,9 @@ final class SearchCoordinator {
         updateSearchResults(for: videosController, with: videosSearchController.filters)
     }
 
-    fileprivate lazy var searchQueue: DispatchQueue = DispatchQueue(label: "Search", qos: .userInteractive)
-
     fileprivate func updateSearchResults(for controller: SessionsTableViewController, with filters: [FilterType]) {
         guard filters.contains(where: { !$0.isEmpty }) else {
-            controller.searchResults = nil
+            controller.filterQuery = nil
 
             return
         }
@@ -221,25 +219,7 @@ final class SearchCoordinator {
 
         os_log("%{public}@", log: log, type: .debug, String(describing: predicate))
 
-        searchQueue.async { [unowned self] in
-            do {
-                let realm = try Realm(configuration: self.storage.realmConfig)
-
-                let results = realm.objects(Session.self).filter(predicate)
-                let keys: Set<String> = Set(results.map { $0.identifier })
-
-                DispatchQueue.main.async {
-                    let searchResults = self.storage.realm.objects(Session.self).filter("identifier IN %@", keys)
-                    controller.searchResults = searchResults
-                }
-            } catch {
-                os_log("Failed to initialize Realm for searching: %{public}@",
-                       log: self.log,
-                       type: .error,
-                       String(describing: error))
-                LoggingHelper.registerError(error, info: ["when": "Searching"])
-            }
-        }
+        controller.filterQuery = predicate
     }
 
     @objc fileprivate func activateSearchField() {

@@ -96,6 +96,7 @@ final class AppCoordinator {
         let scheduleItem = NSTabViewItem(viewController: scheduleController)
         scheduleItem.label = "Schedule"
         scheduleItem.initialFirstResponder = scheduleController.listViewController.tableView
+        scheduleController.listViewController.storage = storage
         tabController.addTabViewItem(scheduleItem)
 
         // Videos
@@ -106,6 +107,7 @@ final class AppCoordinator {
         let videosItem = NSTabViewItem(viewController: videosController)
         videosItem.label = "Videos"
         videosItem.initialFirstResponder = videosController.listViewController.tableView
+        videosController.listViewController.storage = storage
         tabController.addTabViewItem(videosItem)
 
         self.windowController = windowController
@@ -223,7 +225,7 @@ final class AppCoordinator {
     func selectSessionOnAppropriateTab(with viewModel: SessionViewModel) {
         switchToAppropriateTab(for: viewModel.sessionInstance)
 
-        currentListController?.selectSession(with: viewModel.identifier)
+        currentListController?.selectSession(with: viewModel.identifier, deferIfNeeded: true)
     }
 
     private func setupDelegation() {

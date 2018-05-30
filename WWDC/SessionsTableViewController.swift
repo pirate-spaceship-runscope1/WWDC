@@ -11,6 +11,7 @@ import RxSwift
 import RxCocoa
 import RealmSwift
 import ConfCore
+import os.log
 
 protocol SessionsTableViewControllerDelegate: class {
 
@@ -38,7 +39,59 @@ class SessionsTableViewController: NSViewController {
 
     let style: SessionsListStyle
 
-    var searchResults: Results<Session>? {
+    fileprivate lazy var searchQueue: DispatchQueue = DispatchQueue(label: "Search", qos: .userInteractive)
+
+    var storage: Storage?
+
+    var forcedIntoListQuery: NSPredicate? {
+        didSet {
+            updateEffectiveQuery()
+        }
+    }
+
+    var filterQuery: NSPredicate? {
+        didSet {
+            updateEffectiveQuery()
+        }
+    }
+
+    func updateEffectiveQuery() {
+        guard let filterQuery = filterQuery else { effectiveQuery = nil; return }
+        guard let forcedIntoListQuery = forcedIntoListQuery else { effectiveQuery = filterQuery; return }
+
+        effectiveQuery = NSCompoundPredicate(orPredicateWithSubpredicates: [filterQuery, forcedIntoListQuery])
+    }
+
+    var effectiveQuery: NSPredicate? {
+        didSet {
+            guard let effectiveQuery = effectiveQuery else {
+                searchResults = nil
+                return
+            }
+
+            searchQueue.async { [unowned self] in
+                do {
+                    let realm = try Realm(configuration: self.storage!.realmConfig)
+
+                    let results = realm.objects(Session.self).filter(effectiveQuery)
+
+                    let football = ThreadSafeReference(to: results)
+                    DispatchQueue.main.async {
+
+                        self.searchResults = self.storage!.realm.resolve(football)
+                    }
+                } catch {
+                    os_log("Failed to initialize Realm for searching: %{public}@",
+                           log: .default,
+                           type: .error,
+                           String(describing: error))
+                    LoggingHelper.registerError(error, info: ["when": "Searching"])
+                }
+            }
+        }
+    }
+
+    private(set) var searchResults: Results<Session>? {
         didSet {
             updateWithSearchResults()
         }
@@ -213,18 +266,25 @@ class SessionsTableViewController: NSViewController {
             deferredSelection = (identifier, scrollOnly)
             return
         }
-        guard let index = displayedRows.index(where: { row in
+        if let index = displayedRows.index(where: { row in
             guard case .session(let viewModel) = row.kind else { return false }
 
             return viewModel.identifier == identifier
-        }) else {
-            return
-        }
+        }) {
+            tableView.scrollRowToCenter(index)
 
-        tableView.scrollRowToCenter(index)
+            if !scrollOnly {
+                tableView.selectRowIndexes(IndexSet([index]), byExtendingSelection: false)
+            }
+        } else {
+            guard deferIfNeeded == false else { return }
 
-        if !scrollOnly {
-            tableView.selectRowIndexes(IndexSet([index]), byExtendingSelection: false)
+            print("Session is not in the list")
+            forcedIntoListQuery = NSPredicate(format: "identifier == %@", identifier)
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                self.selectSession(with: identifier, scrollOnly: scrollOnly, deferIfNeeded: deferIfNeeded)
+            }
         }
     }
 
