@@ -43,6 +43,10 @@ class SessionsTableViewController: NSViewController {
 
     var storage: Storage?
 
+//    func forceRowIntoList(for viewModel: SessionViewModel) -> Bool {
+//        forcedIntoListQuery =
+//    }
+
     var forcedIntoListQuery: NSPredicate? {
         didSet {
             updateEffectiveQuery()
@@ -73,11 +77,8 @@ class SessionsTableViewController: NSViewController {
                 do {
                     let realm = try Realm(configuration: self.storage!.realmConfig)
 
-                    let results = realm.objects(Session.self).filter(effectiveQuery)
-
-                    let football = ThreadSafeReference(to: results)
+                    let football = ThreadSafeReference(to: realm.objects(Session.self).filter(effectiveQuery))
                     DispatchQueue.main.async {
-
                         self.searchResults = self.storage!.realm.resolve(football)
                     }
                 } catch {
@@ -91,9 +92,16 @@ class SessionsTableViewController: NSViewController {
         }
     }
 
+    func setSearchResults(_ searchResults: Results<Session>?, animated: Bool) {
+        _searchResults = searchResults
+        updateWithSearchResults(animated: animated)
+    }
+    private var _searchResults: Results<Session>?
     private(set) var searchResults: Results<Session>? {
-        didSet {
-            updateWithSearchResults()
+        get { return _searchResults }
+        set {
+            _searchResults = newValue
+            updateWithSearchResults(animated: true)
         }
     }
 
@@ -104,6 +112,15 @@ class SessionsTableViewController: NSViewController {
     }
 
     private var allRows: [SessionRow] = []
+
+    func canDisplay(session: SessionViewModel) -> Bool {
+        return allRows.contains { row -> Bool in
+            if case .session(let viewModel) = row.kind {
+                return viewModel.identifier == session.identifier
+            }
+            return false
+        }
+    }
 
     private(set) var displayedRows: [SessionRow] = []
 
@@ -132,10 +149,10 @@ class SessionsTableViewController: NSViewController {
 
             if let deferredSelection = self.deferredSelection {
                 self.deferredSelection = nil
-                self.selectSession(with: deferredSelection.identifier, scrollOnly: deferredSelection.scrollOnly)
+                self.selectSessionImmediately(with: deferredSelection)
             }
 
-            // Ensures an initial selection since `scrollOnly` won't select anything
+            // Ensure an initial selection
             if self.tableView.selectedRow == -1,
                 let defaultIndex = rows.firstSessionRowIndex() {
 
@@ -256,36 +273,32 @@ class SessionsTableViewController: NSViewController {
         fatalError("init(coder:) has not been implemented")
     }
 
-    private var deferredSelection: (identifier: String, scrollOnly: Bool)?
+    private var deferredSelection: String?
 
-    func selectSession(with identifier: String, scrollOnly: Bool = false, deferIfNeeded: Bool = false) {
+    private func selectSessionImmediately(with identifier: String) {
 
-        // If we haven't yet displayed our rows, likely because we haven't come on screen
-        // yet. We defer scrolling to the requested identifier until that time.
-        guard hasPerformedInitialRowDisplay || !deferIfNeeded else {
-            deferredSelection = (identifier, scrollOnly)
-            return
-        }
-        if let index = displayedRows.index(where: { row in
+        guard let index = displayedRows.index(where: { row in
             guard case .session(let viewModel) = row.kind else { return false }
 
             return viewModel.identifier == identifier
-        }) {
-            tableView.scrollRowToCenter(index)
-
-            if !scrollOnly {
-                tableView.selectRowIndexes(IndexSet([index]), byExtendingSelection: false)
-            }
-        } else {
-            guard deferIfNeeded == false else { return }
-
-            print("Session is not in the list")
-            forcedIntoListQuery = NSPredicate(format: "identifier == %@", identifier)
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                self.selectSession(with: identifier, scrollOnly: scrollOnly, deferIfNeeded: deferIfNeeded)
-            }
+        }) else {
+            return
         }
+
+        tableView.scrollRowToCenter(index)
+        tableView.selectRowIndexes(IndexSet([index]), byExtendingSelection: false)
+    }
+
+    func selectSession(with identifier: String) {
+
+        // If we haven't yet displayed our rows, likely because we haven't come on screen
+        // yet. We defer scrolling to the requested identifier until that time.
+        guard hasPerformedInitialRowDisplay else {
+            deferredSelection = identifier
+            return
+        }
+
+        selectSessionImmediately(with: identifier)
     }
 
     func scrollToToday() {
@@ -294,7 +307,7 @@ class SessionsTableViewController: NSViewController {
             // to today. This is currently resulting in the top of the list being selected but
             // the list being scrolled to an event that is "today". I feel like we could either restore
             // the saved selection and scroll to today OR scroll to and select the first session of "today"
-            selectSession(with: identifier, scrollOnly: true, deferIfNeeded: true)
+            selectSession(with: identifier)
         }
     }
 
@@ -319,13 +332,13 @@ class SessionsTableViewController: NSViewController {
         allRows = sessionRowProvider?.sessionRows() ?? []
     }
 
-    private func updateWithSearchResults() {
+    private func updateWithSearchResults(animated: Bool = true) {
         guard view.window != nil else { return }
 
         guard let results = searchResults else {
 
             if !allRows.isEmpty {
-                setDisplayedRows(allRows, animated: true)
+                setDisplayedRows(allRows, animated: animated)
             }
 
             return
@@ -347,7 +360,7 @@ class SessionsTableViewController: NSViewController {
             return SessionRow(viewModel: viewModel)
         }
 
-        setDisplayedRows(sessionRows, animated: true)
+        setDisplayedRows(sessionRows, animated: animated)
     }
 
     lazy var searchController: SearchFiltersViewController = {

@@ -225,7 +225,7 @@ final class AppCoordinator {
     func selectSessionOnAppropriateTab(with viewModel: SessionViewModel) {
         switchToAppropriateTab(for: viewModel.sessionInstance)
 
-        currentListController?.selectSession(with: viewModel.identifier, deferIfNeeded: true)
+        currentListController?.selectSession(with: viewModel.identifier)
     }
 
     private func setupDelegation() {
@@ -387,11 +387,11 @@ final class AppCoordinator {
         tabController.activeTab = activeTab
 
         if let identifier = Preferences.shared.selectedScheduleItemIdentifier {
-            scheduleController.listViewController.selectSession(with: identifier, deferIfNeeded: true)
+            scheduleController.listViewController.selectSession(with: identifier)
         }
 
         if let identifier = Preferences.shared.selectedVideoItemIdentifier {
-            videosController.listViewController.selectSession(with: identifier, deferIfNeeded: true)
+            videosController.listViewController.selectSession(with: identifier)
         }
     }
 
@@ -407,10 +407,10 @@ final class AppCoordinator {
 
         if link.isForCurrentYear {
             tabController.activeTab = .schedule
-            scheduleController.listViewController.selectSession(with: link.sessionIdentifier, deferIfNeeded: true)
+            scheduleController.listViewController.selectSession(with: link.sessionIdentifier)
         } else {
             tabController.activeTab = .videos
-            videosController.listViewController.selectSession(with: link.sessionIdentifier, deferIfNeeded: true)
+            videosController.listViewController.selectSession(with: link.sessionIdentifier)
         }
     }
 
