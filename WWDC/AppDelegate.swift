@@ -69,7 +69,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillBecomeActive(_ notification: Notification) {
-
+        do {
+            print("l")
+        }
         if coordinator.windowController.window?.isVisible == false {
             coordinator.windowController.showWindow(self)
         }
