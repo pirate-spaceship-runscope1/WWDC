@@ -13,35 +13,6 @@ import RealmSwift
 import ConfCore
 import os.log
 
-protocol SessionIdentifiable {
-    var sessionIdentifier: String { get }
-}
-
-struct SessionIdentifier: SessionIdentifiable {
-    let sessionIdentifier: String
-
-    init(_ string: String) {
-        sessionIdentifier = string
-    }
-}
-
-extension SessionViewModel: SessionIdentifiable {
-    var sessionIdentifier: String {
-        return identifier
-    }
-}
-
-protocol SessionsTableViewControllerDelegate: class {
-
-    func sessionTableViewContextMenuActionWatch(viewModels: [SessionViewModel])
-    func sessionTableViewContextMenuActionUnWatch(viewModels: [SessionViewModel])
-    func sessionTableViewContextMenuActionFavorite(viewModels: [SessionViewModel])
-    func sessionTableViewContextMenuActionRemoveFavorite(viewModels: [SessionViewModel])
-    func sessionTableViewContextMenuActionDownload(viewModels: [SessionViewModel])
-    func sessionTableViewContextMenuActionCancelDownload(viewModels: [SessionViewModel])
-    func sessionTableViewContextMenuActionRevealInFinder(viewModels: [SessionViewModel])
-}
-
 class SessionsTableViewController: NSViewController {
 
     fileprivate struct Metrics {
@@ -130,24 +101,6 @@ class SessionsTableViewController: NSViewController {
     }
 
     private var allRows: [SessionRow] = []
-
-    func isSessionVisible(for session: SessionIdentifiable) -> Bool {
-        return displayedRows.contains { row -> Bool in
-            if case .session(let viewModel) = row.kind {
-                return viewModel.identifier == session.sessionIdentifier
-            }
-            return false
-        }
-    }
-
-    func canDisplay(session: SessionIdentifiable) -> Bool {
-        return allRows.contains { row -> Bool in
-            if case .session(let viewModel) = row.kind {
-                return viewModel.identifier == session.sessionIdentifier
-            }
-            return false
-        }
-    }
 
     private(set) var displayedRows: [SessionRow] = []
 
@@ -288,6 +241,24 @@ class SessionsTableViewController: NSViewController {
         }
     }
 
+    func isSessionVisible(for session: SessionIdentifiable) -> Bool {
+        return displayedRows.contains { row -> Bool in
+            if case .session(let viewModel) = row.kind {
+                return viewModel.identifier == session.sessionIdentifier
+            }
+            return false
+        }
+    }
+
+    func canDisplay(session: SessionIdentifiable) -> Bool {
+        return allRows.contains { row -> Bool in
+            if case .session(let viewModel) = row.kind {
+                return viewModel.identifier == session.sessionIdentifier
+            }
+            return false
+        }
+    }
+
     init(style: SessionsListStyle) {
         self.style = style
 
@@ -359,19 +330,13 @@ class SessionsTableViewController: NSViewController {
         updateWith(searchResults: searchResults, selecting: nil)
     }
 
-    func configureRows(weekdayIsVisible: Bool) {
-
-        for row in allRows {
-            if case .session(let viewModel) = row.kind {
-                viewModel.showsWeekdayInContext = weekdayIsVisible
-            }
-        }
-    }
-
     private func updateWith(searchResults: Results<Session>?, animated: Bool = true, selecting session: SessionIdentifiable?) {
         guard view.window != nil else { return }
 
-        configureRows(weekdayIsVisible: !(searchResults?.isEmpty ?? true))
+        let showWeekday = !(searchResults?.isEmpty ?? true)
+        allRows.forEachSessionViewModel {
+            $0.showsWeekdayInContext = showWeekday
+        }
 
         guard let results = searchResults else {
 
@@ -622,17 +587,6 @@ class SessionsTableViewController: NSViewController {
     }
 }
 
-extension Session {
-
-    var isWatched: Bool {
-        if let progress = progresses.first {
-            return progress.relativePosition > Constants.watchedVideoRelativePosition
-        }
-
-        return false
-    }
-}
-
 extension SessionsTableViewController: NSTableViewDataSource, NSTableViewDelegate {
 
     private struct Constants {
@@ -744,24 +698,4 @@ private extension NSMenuItem {
         }
     }
 
-}
-
-private extension Array where Element == SessionRow {
-
-    func index(of session: SessionIdentifiable) -> Int? {
-        return index { row in
-            guard case .session(let viewModel) = row.kind else { return false }
-
-            return viewModel.identifier == session.sessionIdentifier
-        }
-    }
-
-    func firstSessionRowIndex() -> Int? {
-        return index { row in
-            if case .session = row.kind {
-                return true
-            }
-            return false
-        }
-    }
 }
