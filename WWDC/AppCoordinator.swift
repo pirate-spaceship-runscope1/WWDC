@@ -205,19 +205,17 @@ final class AppCoordinator {
         updateCurrentActivity(with: selectedViewModelRegardlessOfTab)
     }
 
-    func switchToAppropriateTab(for viewModel: SessionViewModel) {
+    func selectSessionOnAppropriateTab(with viewModel: SessionViewModel) {
 
-        if videosController.listViewController.canDisplaySession(with: viewModel) {
+        // TODO: Should we favor showing the session on the current tab if it's possible? I think so.
+        if videosController.listViewController.canDisplay(session: viewModel) {
+            videosController.listViewController.select(session: viewModel)
             tabController.activeTab = .videos
-        } else if scheduleController.listViewController.canDisplaySession(with: viewModel) {
+
+        } else if scheduleController.listViewController.canDisplay(session: viewModel) {
+            scheduleController.listViewController.select(session: viewModel)
             tabController.activeTab = .schedule
         }
-    }
-
-    func selectSessionOnAppropriateTab(with viewModel: SessionViewModel) {
-        switchToAppropriateTab(for: viewModel)
-
-        currentListController?.selectSession(with: viewModel.identifier)
     }
 
     private func setupDelegation() {
@@ -379,11 +377,11 @@ final class AppCoordinator {
         tabController.activeTab = activeTab
 
         if let identifier = Preferences.shared.selectedScheduleItemIdentifier {
-            scheduleController.listViewController.selectSession(with: identifier)
+            scheduleController.listViewController.select(session: SessionIdentifier(identifier))
         }
 
         if let identifier = Preferences.shared.selectedVideoItemIdentifier {
-            videosController.listViewController.selectSession(with: identifier)
+            videosController.listViewController.select(session: SessionIdentifier(identifier))
         }
     }
 
@@ -399,10 +397,10 @@ final class AppCoordinator {
 
         if link.isForCurrentYear {
             tabController.activeTab = .schedule
-            scheduleController.listViewController.selectSession(with: link.sessionIdentifier)
+            scheduleController.listViewController.select(session: SessionIdentifier(link.sessionIdentifier))
         } else {
             tabController.activeTab = .videos
-            videosController.listViewController.selectSession(with: link.sessionIdentifier)
+            videosController.listViewController.select(session: SessionIdentifier(link.sessionIdentifier))
         }
     }
 

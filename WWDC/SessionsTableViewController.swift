@@ -13,6 +13,24 @@ import RealmSwift
 import ConfCore
 import os.log
 
+protocol SessionIdentifiable {
+    var sessionIdentifier: String { get }
+}
+
+struct SessionIdentifier: SessionIdentifiable {
+    let sessionIdentifier: String
+
+    init(_ string: String) {
+        sessionIdentifier = string
+    }
+}
+
+extension SessionViewModel: SessionIdentifiable {
+    var sessionIdentifier: String {
+        return identifier
+    }
+}
+
 protocol SessionsTableViewControllerDelegate: class {
 
     func sessionTableViewContextMenuActionWatch(viewModels: [SessionViewModel])
@@ -92,9 +110,9 @@ class SessionsTableViewController: NSViewController {
         }
     }
 
-    func setSearchResults(_ searchResults: Results<Session>?, animated: Bool, selecting viewModel: SessionViewModel?) {
+    func setSearchResults(_ searchResults: Results<Session>?, animated: Bool, selecting session: SessionIdentifiable) {
         _searchResults = searchResults
-        updateWith(searchResults: searchResults, animated: animated, selecting: viewModel)
+        updateWith(searchResults: searchResults, animated: animated, selecting: session)
     }
     private var _searchResults: Results<Session>?
     private(set) var searchResults: Results<Session>? {
@@ -113,19 +131,19 @@ class SessionsTableViewController: NSViewController {
 
     private var allRows: [SessionRow] = []
 
-    func isSessionVisible(for viewModelInQuestion: SessionViewModel) -> Bool {
+    func isSessionVisible(for session: SessionIdentifiable) -> Bool {
         return displayedRows.contains { row -> Bool in
             if case .session(let viewModel) = row.kind {
-                return viewModel.identifier == viewModelInQuestion.identifier
+                return viewModel.identifier == session.sessionIdentifier
             }
             return false
         }
     }
 
-    func canDisplaySession(with viewModelToDisplay: SessionViewModel) -> Bool {
+    func canDisplay(session: SessionIdentifiable) -> Bool {
         return allRows.contains { row -> Bool in
             if case .session(let viewModel) = row.kind {
-                return viewModel.identifier == viewModelToDisplay.identifier
+                return viewModel.identifier == session.sessionIdentifier
             }
             return false
         }
@@ -156,8 +174,8 @@ class SessionsTableViewController: NSViewController {
             tableView.reloadData()
         }, completionHandler: {
 
-            if let deferredSelection = self.initialSelectionSessionIdentifier {
-                self.initialSelectionSessionIdentifier = nil
+            if let deferredSelection = self.initialSelection {
+                self.initialSelection = nil
                 self.selectSessionImmediately(with: deferredSelection)
             }
 
@@ -176,7 +194,7 @@ class SessionsTableViewController: NSViewController {
         return false
     }
 
-    func setDisplayedRows(_ newValue: [SessionRow], animated: Bool, overridingSelectionWith viewModelToSelect: SessionViewModel?) {
+    func setDisplayedRows(_ newValue: [SessionRow], animated: Bool, overridingSelectionWith session: SessionIdentifiable?) {
 
         guard performInitialRowDisplayIfNeeded(displaying: newValue) else { return }
 
@@ -218,8 +236,8 @@ class SessionsTableViewController: NSViewController {
             DispatchQueue.main.sync {
 
                 var selectedIndexes = IndexSet()
-                if let viewModelToSelect = viewModelToSelect,
-                    let overrideIndex = newValue.index(of: viewModelToSelect) {
+                if let session = session,
+                    let overrideIndex = newValue.index(of: session) {
 
                     selectedIndexes.insert(overrideIndex)
                 } else {
@@ -282,14 +300,14 @@ class SessionsTableViewController: NSViewController {
         fatalError("init(coder:) has not been implemented")
     }
 
-    private var initialSelectionSessionIdentifier: String?
+    private var initialSelection: SessionIdentifiable?
 
-    private func selectSessionImmediately(with identifier: String) {
+    private func selectSessionImmediately(with identifier: SessionIdentifiable) {
 
         guard let index = displayedRows.index(where: { row in
             guard case .session(let viewModel) = row.kind else { return false }
 
-            return viewModel.identifier == identifier
+            return viewModel.identifier == identifier.sessionIdentifier
         }) else {
             return
         }
@@ -298,36 +316,30 @@ class SessionsTableViewController: NSViewController {
         tableView.selectRowIndexes(IndexSet([index]), byExtendingSelection: false)
     }
 
-    func selectSession(with identifier: String) {
+    func select(session: SessionIdentifiable) {
+
+        let needsToClearSearchToAllowSelection = !isSessionVisible(for: session) && canDisplay(session: session)
 
         // If we haven't yet displayed our rows, likely because we haven't come on screen
         // yet. We defer scrolling to the requested identifier until that time.
         guard hasPerformedInitialRowDisplay else {
+            searchController.resetFilters()
             _searchResults = nil
-            initialSelectionSessionIdentifier = identifier
+            initialSelection = session
             return
         }
 
-        selectSessionImmediately(with: identifier)
-    }
-
-    func selectSession(with viewModel: SessionViewModel) {
-
-        if hasPerformedInitialRowDisplay && !isSessionVisible(for: viewModel) && canDisplaySession(with: viewModel) {
-            setSearchResults(nil, animated: false, selecting: viewModel)
+        if needsToClearSearchToAllowSelection {
+            searchController.resetFilters()
+            setSearchResults(nil, animated: view.window != nil, selecting: session)
         } else {
-            selectSession(with: viewModel.identifier)
+            selectSessionImmediately(with: session)
         }
     }
 
     func scrollToToday() {
-        if let identifier = sessionRowProvider?.sessionRowIdentifierForToday() {
-            // We are skipping restoring the selection, but also we are only doing the scroll
-            // to today. This is currently resulting in the top of the list being selected but
-            // the list being scrolled to an event that is "today". I feel like we could either restore
-            // the saved selection and scroll to today OR scroll to and select the first session of "today"
-            selectSession(with: identifier)
-        }
+
+        sessionRowProvider?.sessionRowIdentifierForToday().flatMap { select(session: $0) }
     }
 
     override func viewDidAppear() {
@@ -356,7 +368,7 @@ class SessionsTableViewController: NSViewController {
         }
     }
 
-    private func updateWith(searchResults: Results<Session>?, animated: Bool = true, selecting viewModel: SessionViewModel?) {
+    private func updateWith(searchResults: Results<Session>?, animated: Bool = true, selecting session: SessionIdentifiable?) {
         guard view.window != nil else { return }
 
         configureRows(weekdayIsVisible: !(searchResults?.isEmpty ?? true))
@@ -364,7 +376,7 @@ class SessionsTableViewController: NSViewController {
         guard let results = searchResults else {
 
             if !allRows.isEmpty {
-                setDisplayedRows(allRows, animated: animated, overridingSelectionWith: viewModel)
+                setDisplayedRows(allRows, animated: animated, overridingSelectionWith: session)
             }
 
             return
@@ -386,7 +398,7 @@ class SessionsTableViewController: NSViewController {
             return SessionRow(viewModel: viewModel)
         }
 
-        setDisplayedRows(sessionRows, animated: animated, overridingSelectionWith: viewModel)
+        setDisplayedRows(sessionRows, animated: animated, overridingSelectionWith: session)
     }
 
     lazy var searchController: SearchFiltersViewController = {
@@ -736,11 +748,11 @@ private extension NSMenuItem {
 
 private extension Array where Element == SessionRow {
 
-    func index(of viewModelToFind: SessionViewModel) -> Int? {
+    func index(of session: SessionIdentifiable) -> Int? {
         return index { row in
             guard case .session(let viewModel) = row.kind else { return false }
 
-            return viewModel.identifier == viewModelToFind.identifier
+            return viewModel.identifier == session.sessionIdentifier
         }
     }
 

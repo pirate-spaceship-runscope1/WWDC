@@ -96,11 +96,13 @@ final class SearchCoordinator {
         let favoritePredicate = NSPredicate(format: "SUBQUERY(favorites, $favorite, $favorite.isDeleted == false).@count > 0")
         var scheduleFavoriteFilter = ToggleFilter(identifier: FilterIdentifier.isFavorite.rawValue,
                                                   isOn: false,
+                                                  defaultValue: false,
                                                   customPredicate: favoritePredicate)
 
         let downloadedPredicate = NSPredicate(format: "isDownloaded == true")
         var scheduleDownloadedFilter = ToggleFilter(identifier: FilterIdentifier.isDownloaded.rawValue,
                                                     isOn: false,
+                                                    defaultValue: false,
                                                     customPredicate: downloadedPredicate)
 
         let smallPositionPred = NSPredicate(format: "SUBQUERY(progresses, $progress, $progress.relativePosition < \(Constants.watchedVideoRelativePosition)).@count > 0")
@@ -110,6 +112,7 @@ final class SearchCoordinator {
 
         var scheduleUnwatchedFilter = ToggleFilter(identifier: FilterIdentifier.isUnwatched.rawValue,
                                                    isOn: false,
+                                                   defaultValue: false,
                                                    customPredicate: unwatchedPredicate)
 
         // Schedule Filtering State Restoration
@@ -182,10 +185,6 @@ final class SearchCoordinator {
         // set delegates
         scheduleSearchController.delegate = self
         videosSearchController.delegate = self
-    }
-
-    func clearScheduleFilters() {
-        scheduleSearchController.filters.forEach { $0.predicate }
     }
 
     func applyScheduleFilters() {
