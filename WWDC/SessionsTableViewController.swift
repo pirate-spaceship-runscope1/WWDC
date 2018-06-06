@@ -92,9 +92,9 @@ class SessionsTableViewController: NSViewController {
         }
     }
 
-    func setSearchResults(_ searchResults: Results<Session>?, animated: Bool) {
+    func setSearchResults(_ searchResults: Results<Session>?, animated: Bool, completion: (() -> Void)? = nil) {
         _searchResults = searchResults
-        updateWithSearchResults(animated: animated)
+        updateWithSearchResults(animated: animated, completion: completion)
     }
     private var _searchResults: Results<Session>?
     private(set) var searchResults: Results<Session>? {
@@ -113,10 +113,19 @@ class SessionsTableViewController: NSViewController {
 
     private var allRows: [SessionRow] = []
 
-    func canDisplay(session: SessionViewModel) -> Bool {
+    func isSessionVisible(for viewModelInQuestion: SessionViewModel) -> Bool {
+        return displayedRows.contains { row -> Bool in
+            if case .session(let viewModel) = row.kind {
+                return viewModel.identifier == viewModelInQuestion.identifier
+            }
+            return false
+        }
+    }
+
+    func canDisplaySession(with viewModelToDisplay: SessionViewModel) -> Bool {
         return allRows.contains { row -> Bool in
             if case .session(let viewModel) = row.kind {
-                return viewModel.identifier == session.identifier
+                return viewModel.identifier == viewModelToDisplay.identifier
             }
             return false
         }
@@ -167,7 +176,7 @@ class SessionsTableViewController: NSViewController {
         return false
     }
 
-    func setDisplayedRows(_ newValue: [SessionRow], animated: Bool) {
+    func setDisplayedRows(_ newValue: [SessionRow], animated: Bool, completion: (() -> Void)? = nil) {
 
         // To support weekday in the context row of the session cell only when filters are active
         let showWeekday = !(searchResults?.isEmpty ?? true)
@@ -237,7 +246,7 @@ class SessionsTableViewController: NSViewController {
                     NSAnimationContext.runAnimationGroup({ (context) in
                         context.allowsImplicitAnimation = true
                         self.tableView.scrollRowToCenter(selectedIndexes.first ?? 0)
-                    }, completionHandler: nil)
+                    }, completionHandler: completion)
                 }
 
                 self.tableView.beginUpdates()
@@ -301,6 +310,17 @@ class SessionsTableViewController: NSViewController {
         selectSessionImmediately(with: identifier)
     }
 
+    func selectSession(with viewModel: SessionViewModel) {
+
+        if !isSessionVisible(for: viewModel) && canDisplaySession(with: viewModel) {
+            setSearchResults(nil, animated: false, completion: {
+                self.selectSession(with: viewModel.identifier)
+            })
+        } else {
+            selectSession(with: viewModel.identifier)
+        }
+    }
+
     func scrollToToday() {
         if let identifier = sessionRowProvider?.sessionRowIdentifierForToday() {
             // We are skipping restoring the selection, but also we are only doing the scroll
@@ -332,13 +352,13 @@ class SessionsTableViewController: NSViewController {
         allRows = sessionRowProvider?.sessionRows() ?? []
     }
 
-    private func updateWithSearchResults(animated: Bool = true) {
+    private func updateWithSearchResults(animated: Bool = true, completion: (() -> Void)? = nil) {
         guard view.window != nil else { return }
 
         guard let results = searchResults else {
 
             if !allRows.isEmpty {
-                setDisplayedRows(allRows, animated: animated)
+                setDisplayedRows(allRows, animated: animated, completion: completion)
             }
 
             return
@@ -360,7 +380,7 @@ class SessionsTableViewController: NSViewController {
             return SessionRow(viewModel: viewModel)
         }
 
-        setDisplayedRows(sessionRows, animated: animated)
+        setDisplayedRows(sessionRows, animated: animated, completion: completion)
     }
 
     lazy var searchController: SearchFiltersViewController = {

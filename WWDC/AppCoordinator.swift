@@ -205,27 +205,19 @@ final class AppCoordinator {
         updateCurrentActivity(with: selectedViewModelRegardlessOfTab)
     }
 
-    func switchToAppropriateTab(for instance: SessionInstance) {
+    func switchToAppropriateTab(for viewModel: SessionViewModel) {
 
-        switch instance.type {
-        case .session where instance.session?.asset(of: .streamingVideo) == nil:
-            // We're making the assumption that if a instance exists and doesn't
-            // have a video, it must be on the schedule tab
-            fallthrough
-        case .specialEvent, .getTogether, .lab, .labByAppointment:
-            // If the session instace is not a video or regular session, we must be
-            // on the schedule tab to show it, since the videos tab only shows videos
-            tabController.activeTab = .schedule
-
-        case .session, .video:
+        if videosController.listViewController.canDisplaySession(with: viewModel) {
             tabController.activeTab = .videos
+        } else if scheduleController.listViewController.canDisplaySession(with: viewModel) {
+            tabController.activeTab = .schedule
         }
     }
 
     func selectSessionOnAppropriateTab(with viewModel: SessionViewModel) {
-        switchToAppropriateTab(for: viewModel.sessionInstance)
+        switchToAppropriateTab(for: viewModel)
 
-        currentListController?.selectSession(with: viewModel.identifier)
+        currentListController?.selectSession(with: viewModel)
     }
 
     private func setupDelegation() {
