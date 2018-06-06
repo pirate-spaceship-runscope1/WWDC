@@ -217,7 +217,7 @@ final class AppCoordinator {
     func selectSessionOnAppropriateTab(with viewModel: SessionViewModel) {
         switchToAppropriateTab(for: viewModel)
 
-        currentListController?.selectSession(with: viewModel)
+        currentListController?.selectSession(with: viewModel.identifier)
     }
 
     private func setupDelegation() {

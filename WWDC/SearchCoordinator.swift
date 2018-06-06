@@ -184,6 +184,10 @@ final class SearchCoordinator {
         videosSearchController.delegate = self
     }
 
+    func clearScheduleFilters() {
+        scheduleSearchController.filters.forEach { $0.predicate }
+    }
+
     func applyScheduleFilters() {
         updateSearchResults(for: scheduleController, with: scheduleSearchController.filters)
     }

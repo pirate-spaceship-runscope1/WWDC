@@ -92,22 +92,22 @@ class SessionsTableViewController: NSViewController {
         }
     }
 
-    func setSearchResults(_ searchResults: Results<Session>?, animated: Bool, completion: (() -> Void)? = nil) {
+    func setSearchResults(_ searchResults: Results<Session>?, animated: Bool, selecting viewModel: SessionViewModel?) {
         _searchResults = searchResults
-        updateWithSearchResults(animated: animated, completion: completion)
+        updateWith(searchResults: searchResults, animated: animated, selecting: viewModel)
     }
     private var _searchResults: Results<Session>?
     private(set) var searchResults: Results<Session>? {
         get { return _searchResults }
         set {
             _searchResults = newValue
-            updateWithSearchResults(animated: true)
+            updateWith(searchResults: newValue, animated: true, selecting: nil)
         }
     }
 
     var sessionRowProvider: SessionRowProvider? {
         didSet {
-            updateAllSessionRows()
+            allRows = sessionRowProvider?.sessionRows() ?? []
         }
     }
 
@@ -156,8 +156,8 @@ class SessionsTableViewController: NSViewController {
             tableView.reloadData()
         }, completionHandler: {
 
-            if let deferredSelection = self.deferredSelection {
-                self.deferredSelection = nil
+            if let deferredSelection = self.initialSelectionSessionIdentifier {
+                self.initialSelectionSessionIdentifier = nil
                 self.selectSessionImmediately(with: deferredSelection)
             }
 
@@ -176,15 +176,7 @@ class SessionsTableViewController: NSViewController {
         return false
     }
 
-    func setDisplayedRows(_ newValue: [SessionRow], animated: Bool, completion: (() -> Void)? = nil) {
-
-        // To support weekday in the context row of the session cell only when filters are active
-        let showWeekday = !(searchResults?.isEmpty ?? true)
-        for row in newValue {
-            if case .session(let viewModel) = row.kind {
-                viewModel.showsWeekdayInContext = showWeekday
-            }
-        }
+    func setDisplayedRows(_ newValue: [SessionRow], animated: Bool, overridingSelectionWith viewModelToSelect: SessionViewModel?) {
 
         guard performInitialRowDisplayIfNeeded(displaying: newValue) else { return }
 
@@ -225,13 +217,21 @@ class SessionsTableViewController: NSViewController {
 
             DispatchQueue.main.sync {
 
-                // Preserve selected rows
-                let selectedRows = self.tableView.selectedRowIndexes.compactMap { (index) -> IndexedSessionRow? in
-                    guard index < oldValue.endIndex else { return nil }
-                    return IndexedSessionRow(sessionRow: oldValue[index], index: index)
+                var selectedIndexes = IndexSet()
+                if let viewModelToSelect = viewModelToSelect,
+                    let overrideIndex = newValue.index(of: viewModelToSelect) {
+
+                    selectedIndexes.insert(overrideIndex)
+                } else {
+                    // Preserve selected rows if possible
+                    let selectedRows = self.tableView.selectedRowIndexes.compactMap { (index) -> IndexedSessionRow? in
+                        guard index < oldValue.endIndex else { return nil }
+                        return IndexedSessionRow(sessionRow: oldValue[index], index: index)
+                    }
+
+                    selectedIndexes = IndexSet(newRowsSet.intersection(selectedRows).map { $0.index })
                 }
 
-                var selectedIndexes = IndexSet(newRowsSet.intersection(selectedRows).map { $0.index })
                 if selectedIndexes.isEmpty, let defaultIndex = newValue.firstSessionRowIndex() {
                     selectedIndexes.insert(defaultIndex)
                 }
@@ -244,9 +244,9 @@ class SessionsTableViewController: NSViewController {
 
                 context.completionHandler = {
                     NSAnimationContext.runAnimationGroup({ (context) in
-                        context.allowsImplicitAnimation = true
+                        context.allowsImplicitAnimation = animated
                         self.tableView.scrollRowToCenter(selectedIndexes.first ?? 0)
-                    }, completionHandler: completion)
+                    }, completionHandler: nil)
                 }
 
                 self.tableView.beginUpdates()
@@ -282,7 +282,7 @@ class SessionsTableViewController: NSViewController {
         fatalError("init(coder:) has not been implemented")
     }
 
-    private var deferredSelection: String?
+    private var initialSelectionSessionIdentifier: String?
 
     private func selectSessionImmediately(with identifier: String) {
 
@@ -303,7 +303,8 @@ class SessionsTableViewController: NSViewController {
         // If we haven't yet displayed our rows, likely because we haven't come on screen
         // yet. We defer scrolling to the requested identifier until that time.
         guard hasPerformedInitialRowDisplay else {
-            deferredSelection = identifier
+            _searchResults = nil
+            initialSelectionSessionIdentifier = identifier
             return
         }
 
@@ -312,10 +313,8 @@ class SessionsTableViewController: NSViewController {
 
     func selectSession(with viewModel: SessionViewModel) {
 
-        if !isSessionVisible(for: viewModel) && canDisplaySession(with: viewModel) {
-            setSearchResults(nil, animated: false, completion: {
-                self.selectSession(with: viewModel.identifier)
-            })
+        if hasPerformedInitialRowDisplay && !isSessionVisible(for: viewModel) && canDisplaySession(with: viewModel) {
+            setSearchResults(nil, animated: false, selecting: viewModel)
         } else {
             selectSession(with: viewModel.identifier)
         }
@@ -345,20 +344,27 @@ class SessionsTableViewController: NSViewController {
     private func performFirstUpdateIfNeeded() {
         guard !hasPerformedInitialRowDisplay else { return }
 
-        updateWithSearchResults()
+        updateWith(searchResults: searchResults, selecting: nil)
     }
 
-    private func updateAllSessionRows() {
-        allRows = sessionRowProvider?.sessionRows() ?? []
+    func configureRows(weekdayIsVisible: Bool) {
+
+        for row in allRows {
+            if case .session(let viewModel) = row.kind {
+                viewModel.showsWeekdayInContext = weekdayIsVisible
+            }
+        }
     }
 
-    private func updateWithSearchResults(animated: Bool = true, completion: (() -> Void)? = nil) {
+    private func updateWith(searchResults: Results<Session>?, animated: Bool = true, selecting viewModel: SessionViewModel?) {
         guard view.window != nil else { return }
+
+        configureRows(weekdayIsVisible: !(searchResults?.isEmpty ?? true))
 
         guard let results = searchResults else {
 
             if !allRows.isEmpty {
-                setDisplayedRows(allRows, animated: animated, completion: completion)
+                setDisplayedRows(allRows, animated: animated, overridingSelectionWith: viewModel)
             }
 
             return
@@ -380,7 +386,7 @@ class SessionsTableViewController: NSViewController {
             return SessionRow(viewModel: viewModel)
         }
 
-        setDisplayedRows(sessionRows, animated: animated, completion: completion)
+        setDisplayedRows(sessionRows, animated: animated, overridingSelectionWith: viewModel)
     }
 
     lazy var searchController: SearchFiltersViewController = {
@@ -730,13 +736,20 @@ private extension NSMenuItem {
 
 private extension Array where Element == SessionRow {
 
-    func firstSessionRowIndex() -> Int? {
-        for (index, row) in enumerated() {
-            if case SessionRowKind.session = row.kind {
-                return index
-            }
-        }
+    func index(of viewModelToFind: SessionViewModel) -> Int? {
+        return index { row in
+            guard case .session(let viewModel) = row.kind else { return false }
 
-        return nil
+            return viewModel.identifier == viewModelToFind.identifier
+        }
+    }
+
+    func firstSessionRowIndex() -> Int? {
+        return index { row in
+            if case .session = row.kind {
+                return true
+            }
+            return false
+        }
     }
 }
