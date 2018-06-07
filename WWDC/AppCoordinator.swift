@@ -96,7 +96,6 @@ final class AppCoordinator {
         let scheduleItem = NSTabViewItem(viewController: scheduleController)
         scheduleItem.label = "Schedule"
         scheduleItem.initialFirstResponder = scheduleController.listViewController.tableView
-        scheduleController.listViewController.storage = storage
         tabController.addTabViewItem(scheduleItem)
 
         // Videos
@@ -107,7 +106,6 @@ final class AppCoordinator {
         let videosItem = NSTabViewItem(viewController: videosController)
         videosItem.label = "Videos"
         videosItem.initialFirstResponder = videosController.listViewController.tableView
-        videosController.listViewController.storage = storage
         tabController.addTabViewItem(videosItem)
 
         self.windowController = windowController

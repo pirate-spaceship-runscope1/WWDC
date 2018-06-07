@@ -197,7 +197,7 @@ final class SearchCoordinator {
 
     fileprivate func updateSearchResults(for controller: SessionsTableViewController, with filters: [FilterType]) {
         guard filters.contains(where: { !$0.isEmpty }) else {
-            controller.filterQuery = nil
+            controller.filterResults = FilterResults(query: nil, storage: storage)
 
             return
         }
@@ -222,7 +222,7 @@ final class SearchCoordinator {
 
         os_log("%{public}@", log: log, type: .debug, String(describing: predicate))
 
-        controller.filterQuery = predicate
+        controller.filterResults = FilterResults(query: predicate, storage: storage)
     }
 
     @objc fileprivate func activateSearchField() {

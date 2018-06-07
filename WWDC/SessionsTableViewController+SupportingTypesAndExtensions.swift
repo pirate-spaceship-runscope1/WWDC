@@ -7,7 +7,13 @@
 //
 
 import ConfCore
+import RealmSwift
+import os.log
 
+/// Conforming to this protocol means the type is capable
+/// of uniquely identifying a `Session`
+///
+/// TODO: Move to ConfCore and make it "official"?
 protocol SessionIdentifiable {
     var sessionIdentifier: String { get }
 }
@@ -71,6 +77,38 @@ extension Array where Element == SessionRow {
         try forEach {
             if case .session(let viewModel) = $0.kind {
                 try body(viewModel)
+            }
+        }
+    }
+}
+
+struct FilterResults {
+
+    /// This becomes an OperationQueue for aborting, tada
+    static let searchQueue = DispatchQueue(label: "Search", qos: .userInteractive)
+    let query: NSPredicate?
+    let storage: Storage?
+
+    func getResults(withSomeKindOfHandler: @escaping (Results<Session>?) -> Void) {
+        guard let query = query else {
+            withSomeKindOfHandler(nil)
+            return
+        }
+
+        FilterResults.searchQueue.async {
+            do {
+                let realm = try Realm(configuration: self.storage!.realmConfig)
+
+                let football = ThreadSafeReference(to: realm.objects(Session.self).filter(query))
+                DispatchQueue.main.async {
+                    withSomeKindOfHandler(self.storage?.realm.resolve(football))
+                }
+            } catch {
+                os_log("Failed to initialize Realm for searching: %{public}@",
+                       log: .default,
+                       type: .error,
+                       String(describing: error))
+                LoggingHelper.registerError(error, info: ["when": "Searching"])
             }
         }
     }

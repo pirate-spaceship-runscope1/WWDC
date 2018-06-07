@@ -132,22 +132,25 @@ class SessionsTableViewController: NSViewController {
         sessionRowProvider?.sessionRowIdentifierForToday().flatMap { select(session: $0) }
     }
 
+    var hasPerformedFirstUpdate = false
+
     /// This function is meant to ensure the table view gets populated
     /// even if its data model gets added while it is offscreen. Specifically,
     /// when this table view is not the initial active tab.
     private func performFirstUpdateIfNeeded() {
-        guard !hasPerformedInitialRowDisplay else { return }
+        guard !hasPerformedFirstUpdate else { return }
+        hasPerformedFirstUpdate = true
 
-        updateWith(searchResults: searchResults, selecting: nil)
+        updateWith(searchResults: _searchResults, animated: true, selecting: nil)
     }
 
-    private func updateWith(searchResults: Results<Session>?, animated: Bool = true, selecting session: SessionIdentifiable?) {
-        guard view.window != nil else { return }
+    private func updateWith(searchResults: Results<Session>?, animated: Bool, selecting session: SessionIdentifiable?) {
+        guard hasPerformedFirstUpdate else { return }
 
-        let showWeekday = !(searchResults?.isEmpty ?? true)
-        allRows.forEachSessionViewModel {
-            $0.showsWeekdayInContext = showWeekday
-        }
+//        let showWeekday = !(searchResults?.isEmpty ?? true)
+//        allRows.forEachSessionViewModel {
+//            $0.showsWeekdayInContext = showWeekday
+//        }
 
         guard let results = searchResults else {
 
@@ -189,10 +192,7 @@ class SessionsTableViewController: NSViewController {
 
     private(set) var displayedRows: [SessionRow] = []
 
-    lazy var displayedRowsLock: DispatchQueue = {
-
-        return DispatchQueue(label: "io.wwdc.sessiontable.displayedrows.lock\(self.hashValue)", qos: .userInteractive)
-    }()
+    lazy var displayedRowsLock = DispatchQueue(label: "io.wwdc.sessiontable.displayedrows.lock\(self.hashValue)", qos: .userInteractive)
 
     private var hasPerformedInitialRowDisplay = false
 
@@ -344,70 +344,26 @@ class SessionsTableViewController: NSViewController {
 
     // MARK: - Search
 
-    fileprivate lazy var searchQueue: DispatchQueue = DispatchQueue(label: "Search", qos: .userInteractive)
-
-    var storage: Storage?
-
-    //    func forceRowIntoList(for viewModel: SessionViewModel) -> Bool {
-    //        forcedIntoListQuery =
-    //    }
-
-    var forcedIntoListQuery: NSPredicate? {
+    var filterResults = FilterResults(query: nil, storage: nil) {
         didSet {
-            updateEffectiveQuery()
-        }
-    }
-
-    var filterQuery: NSPredicate? {
-        didSet {
-            updateEffectiveQuery()
-        }
-    }
-
-    func updateEffectiveQuery() {
-        guard let filterQuery = filterQuery else { effectiveQuery = nil; return }
-        guard let forcedIntoListQuery = forcedIntoListQuery else { effectiveQuery = filterQuery; return }
-
-        effectiveQuery = NSCompoundPredicate(orPredicateWithSubpredicates: [filterQuery, forcedIntoListQuery])
-    }
-
-    var effectiveQuery: NSPredicate? {
-        didSet {
-            guard let effectiveQuery = effectiveQuery else {
-                searchResults = nil
-                return
-            }
-
-            searchQueue.async { [unowned self] in
-                do {
-                    let realm = try Realm(configuration: self.storage!.realmConfig)
-
-                    let football = ThreadSafeReference(to: realm.objects(Session.self).filter(effectiveQuery))
-                    DispatchQueue.main.async {
-                        self.searchResults = self.storage!.realm.resolve(football)
-                    }
-                } catch {
-                    os_log("Failed to initialize Realm for searching: %{public}@",
-                           log: .default,
-                           type: .error,
-                           String(describing: error))
-                    LoggingHelper.registerError(error, info: ["when": "Searching"])
-                }
+            filterResults.getResults {
+                self.setSearchResults($0, animated: true, selecting: nil)
             }
         }
     }
 
-    func setSearchResults(_ searchResults: Results<Session>?, animated: Bool, selecting session: SessionIdentifiable) {
+    /// Resolved search results backing store
+    private var _searchResults: Results<Session>?
+
+    /// Set the search results to be displayed.
+    /// - Parameters:
+    ///     - searchResults: The search results to show
+    ///     - animated: Whether to animate the change
+    ///     - session: The means by which to select a session after displaying the results, if `nil`
+    ///             a default selection will be provided
+    func setSearchResults(_ searchResults: Results<Session>?, animated: Bool, selecting session: SessionIdentifiable?) {
         _searchResults = searchResults
         updateWith(searchResults: searchResults, animated: animated, selecting: session)
-    }
-    private var _searchResults: Results<Session>?
-    private(set) var searchResults: Results<Session>? {
-        get { return _searchResults }
-        set {
-            _searchResults = newValue
-            updateWith(searchResults: newValue, animated: true, selecting: nil)
-        }
     }
 
     // MARK: - UI
