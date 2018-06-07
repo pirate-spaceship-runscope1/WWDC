@@ -13,12 +13,9 @@ import RealmSwift
 import ConfCore
 import os.log
 
-class SessionsTableViewController: NSViewController {
+// MARK: - Sessions Table View Controller
 
-    fileprivate struct Metrics {
-        static let headerRowHeight: CGFloat = 20
-        static let sessionRowHeight: CGFloat = 64
-    }
+class SessionsTableViewController: NSViewController {
 
     private let disposeBag = DisposeBag()
 
@@ -28,71 +25,159 @@ class SessionsTableViewController: NSViewController {
 
     let style: SessionsListStyle
 
-    fileprivate lazy var searchQueue: DispatchQueue = DispatchQueue(label: "Search", qos: .userInteractive)
+    init(style: SessionsListStyle) {
+        self.style = style
 
-    var storage: Storage?
+        super.init(nibName: nil, bundle: nil)
 
-//    func forceRowIntoList(for viewModel: SessionViewModel) -> Bool {
-//        forcedIntoListQuery =
-//    }
+        identifier = NSUserInterfaceItemIdentifier(rawValue: "videosList")
+    }
 
-    var forcedIntoListQuery: NSPredicate? {
-        didSet {
-            updateEffectiveQuery()
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func loadView() {
+        view = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: MainWindowController.defaultRect.height))
+        view.wantsLayer = true
+        view.layer?.backgroundColor = NSColor.darkWindowBackground.cgColor
+        view.widthAnchor.constraint(lessThanOrEqualToConstant: 675).isActive = true
+
+        scrollView.frame = view.bounds
+        tableView.frame = view.bounds
+
+        scrollView.widthAnchor.constraint(greaterThanOrEqualToConstant: 300).isActive = true
+
+        view.addSubview(scrollView)
+        view.addSubview(searchController.view)
+
+        searchController.view.translatesAutoresizingMaskIntoConstraints = false
+
+        scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor).isActive = true
+        scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor).isActive = true
+        scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor).isActive = true
+
+        scrollView.topAnchor.constraint(equalTo: searchController.view.bottomAnchor).isActive = true
+
+        searchController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor).isActive = true
+        searchController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor).isActive = true
+        searchController.view.topAnchor.constraint(equalTo: view.topAnchor).isActive = true
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        tableView.dataSource = self
+        tableView.delegate = self
+
+        setupContextualMenu()
+
+        tableView.rx.selectedRow.map { index -> SessionViewModel? in
+            guard let index = index else { return nil }
+            guard case .session(let viewModel) = self.displayedRows[index].kind else { return nil }
+
+            return viewModel
+            }.bind(to: selectedSession).disposed(by: disposeBag)
+    }
+
+    override func viewDidAppear() {
+        super.viewDidAppear()
+
+        view.window?.makeFirstResponder(tableView)
+
+        performFirstUpdateIfNeeded()
+    }
+
+    // MARK: - Selection
+
+    private var initialSelection: SessionIdentifiable?
+
+    private func selectSessionImmediately(with identifier: SessionIdentifiable) {
+
+        guard let index = displayedRows.index(where: { row in
+            guard case .session(let viewModel) = row.kind else { return false }
+
+            return viewModel.identifier == identifier.sessionIdentifier
+        }) else {
+            return
+        }
+
+        tableView.scrollRowToCenter(index)
+        tableView.selectRowIndexes(IndexSet([index]), byExtendingSelection: false)
+    }
+
+    func select(session: SessionIdentifiable) {
+
+        let needsToClearSearchToAllowSelection = !isSessionVisible(for: session) && canDisplay(session: session)
+
+        // If we haven't yet displayed our rows, likely because we haven't come on screen
+        // yet. We defer scrolling to the requested identifier until that time.
+        guard hasPerformedInitialRowDisplay else {
+            searchController.resetFilters()
+            _searchResults = nil
+            initialSelection = session
+            return
+        }
+
+        if needsToClearSearchToAllowSelection {
+            searchController.resetFilters()
+            setSearchResults(nil, animated: view.window != nil, selecting: session)
+        } else {
+            selectSessionImmediately(with: session)
         }
     }
 
-    var filterQuery: NSPredicate? {
-        didSet {
-            updateEffectiveQuery()
+    func scrollToToday() {
+
+        sessionRowProvider?.sessionRowIdentifierForToday().flatMap { select(session: $0) }
+    }
+
+    /// This function is meant to ensure the table view gets populated
+    /// even if its data model gets added while it is offscreen. Specifically,
+    /// when this table view is not the initial active tab.
+    private func performFirstUpdateIfNeeded() {
+        guard !hasPerformedInitialRowDisplay else { return }
+
+        updateWith(searchResults: searchResults, selecting: nil)
+    }
+
+    private func updateWith(searchResults: Results<Session>?, animated: Bool = true, selecting session: SessionIdentifiable?) {
+        guard view.window != nil else { return }
+
+        let showWeekday = !(searchResults?.isEmpty ?? true)
+        allRows.forEachSessionViewModel {
+            $0.showsWeekdayInContext = showWeekday
         }
-    }
 
-    func updateEffectiveQuery() {
-        guard let filterQuery = filterQuery else { effectiveQuery = nil; return }
-        guard let forcedIntoListQuery = forcedIntoListQuery else { effectiveQuery = filterQuery; return }
+        guard let results = searchResults else {
 
-        effectiveQuery = NSCompoundPredicate(orPredicateWithSubpredicates: [filterQuery, forcedIntoListQuery])
-    }
-
-    var effectiveQuery: NSPredicate? {
-        didSet {
-            guard let effectiveQuery = effectiveQuery else {
-                searchResults = nil
-                return
+            if !allRows.isEmpty {
+                setDisplayedRows(allRows, animated: animated, overridingSelectionWith: session)
             }
 
-            searchQueue.async { [unowned self] in
-                do {
-                    let realm = try Realm(configuration: self.storage!.realmConfig)
+            return
+        }
 
-                    let football = ThreadSafeReference(to: realm.objects(Session.self).filter(effectiveQuery))
-                    DispatchQueue.main.async {
-                        self.searchResults = self.storage!.realm.resolve(football)
-                    }
-                } catch {
-                    os_log("Failed to initialize Realm for searching: %{public}@",
-                           log: .default,
-                           type: .error,
-                           String(describing: error))
-                    LoggingHelper.registerError(error, info: ["when": "Searching"])
+        guard let sessionRowProvider = sessionRowProvider else { return }
+
+        let sortingFunction = sessionRowProvider.sessionSortingFunction
+
+        let sessionRows: [SessionRow] = results.sorted(by: sortingFunction).compactMap { session in
+            guard let viewModel = SessionViewModel(session: session) else { return nil }
+
+            for row in allRows {
+                if case .session(let sessionViewModel) = row.kind, sessionViewModel.session.identifier == session.identifier {
+                    return row
                 }
             }
+
+            return SessionRow(viewModel: viewModel)
         }
+
+        setDisplayedRows(sessionRows, animated: animated, overridingSelectionWith: session)
     }
 
-    func setSearchResults(_ searchResults: Results<Session>?, animated: Bool, selecting session: SessionIdentifiable) {
-        _searchResults = searchResults
-        updateWith(searchResults: searchResults, animated: animated, selecting: session)
-    }
-    private var _searchResults: Results<Session>?
-    private(set) var searchResults: Results<Session>? {
-        get { return _searchResults }
-        set {
-            _searchResults = newValue
-            updateWith(searchResults: newValue, animated: true, selecting: nil)
-        }
-    }
+    // MARK: - Updating the Displayed Rows
 
     var sessionRowProvider: SessionRowProvider? {
         didSet {
@@ -103,8 +188,6 @@ class SessionsTableViewController: NSViewController {
     private var allRows: [SessionRow] = []
 
     private(set) var displayedRows: [SessionRow] = []
-
-    // MARK: - Displaying Rows
 
     lazy var displayedRowsLock: DispatchQueue = {
 
@@ -259,112 +342,75 @@ class SessionsTableViewController: NSViewController {
         }
     }
 
-    init(style: SessionsListStyle) {
-        self.style = style
+    // MARK: - Search
 
-        super.init(nibName: nil, bundle: nil)
+    fileprivate lazy var searchQueue: DispatchQueue = DispatchQueue(label: "Search", qos: .userInteractive)
 
-        identifier = NSUserInterfaceItemIdentifier(rawValue: "videosList")
-    }
+    var storage: Storage?
 
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
+    //    func forceRowIntoList(for viewModel: SessionViewModel) -> Bool {
+    //        forcedIntoListQuery =
+    //    }
 
-    private var initialSelection: SessionIdentifiable?
-
-    private func selectSessionImmediately(with identifier: SessionIdentifiable) {
-
-        guard let index = displayedRows.index(where: { row in
-            guard case .session(let viewModel) = row.kind else { return false }
-
-            return viewModel.identifier == identifier.sessionIdentifier
-        }) else {
-            return
-        }
-
-        tableView.scrollRowToCenter(index)
-        tableView.selectRowIndexes(IndexSet([index]), byExtendingSelection: false)
-    }
-
-    func select(session: SessionIdentifiable) {
-
-        let needsToClearSearchToAllowSelection = !isSessionVisible(for: session) && canDisplay(session: session)
-
-        // If we haven't yet displayed our rows, likely because we haven't come on screen
-        // yet. We defer scrolling to the requested identifier until that time.
-        guard hasPerformedInitialRowDisplay else {
-            searchController.resetFilters()
-            _searchResults = nil
-            initialSelection = session
-            return
-        }
-
-        if needsToClearSearchToAllowSelection {
-            searchController.resetFilters()
-            setSearchResults(nil, animated: view.window != nil, selecting: session)
-        } else {
-            selectSessionImmediately(with: session)
+    var forcedIntoListQuery: NSPredicate? {
+        didSet {
+            updateEffectiveQuery()
         }
     }
 
-    func scrollToToday() {
-
-        sessionRowProvider?.sessionRowIdentifierForToday().flatMap { select(session: $0) }
-    }
-
-    override func viewDidAppear() {
-        super.viewDidAppear()
-
-        view.window?.makeFirstResponder(tableView)
-
-        performFirstUpdateIfNeeded()
-    }
-
-    /// This function is meant to ensure the table view gets populated
-    /// even if its data model gets added while it is offscreen. Specifically,
-    /// when this table view is not the initial active tab.
-    private func performFirstUpdateIfNeeded() {
-        guard !hasPerformedInitialRowDisplay else { return }
-
-        updateWith(searchResults: searchResults, selecting: nil)
-    }
-
-    private func updateWith(searchResults: Results<Session>?, animated: Bool = true, selecting session: SessionIdentifiable?) {
-        guard view.window != nil else { return }
-
-        let showWeekday = !(searchResults?.isEmpty ?? true)
-        allRows.forEachSessionViewModel {
-            $0.showsWeekdayInContext = showWeekday
+    var filterQuery: NSPredicate? {
+        didSet {
+            updateEffectiveQuery()
         }
+    }
 
-        guard let results = searchResults else {
+    func updateEffectiveQuery() {
+        guard let filterQuery = filterQuery else { effectiveQuery = nil; return }
+        guard let forcedIntoListQuery = forcedIntoListQuery else { effectiveQuery = filterQuery; return }
 
-            if !allRows.isEmpty {
-                setDisplayedRows(allRows, animated: animated, overridingSelectionWith: session)
+        effectiveQuery = NSCompoundPredicate(orPredicateWithSubpredicates: [filterQuery, forcedIntoListQuery])
+    }
+
+    var effectiveQuery: NSPredicate? {
+        didSet {
+            guard let effectiveQuery = effectiveQuery else {
+                searchResults = nil
+                return
             }
 
-            return
-        }
+            searchQueue.async { [unowned self] in
+                do {
+                    let realm = try Realm(configuration: self.storage!.realmConfig)
 
-        guard let sessionRowProvider = sessionRowProvider else { return }
-
-        let sortingFunction = sessionRowProvider.sessionSortingFunction
-
-        let sessionRows: [SessionRow] = results.sorted(by: sortingFunction).compactMap { session in
-            guard let viewModel = SessionViewModel(session: session) else { return nil }
-
-            for row in allRows {
-                if case .session(let sessionViewModel) = row.kind, sessionViewModel.session.identifier == session.identifier {
-                    return row
+                    let football = ThreadSafeReference(to: realm.objects(Session.self).filter(effectiveQuery))
+                    DispatchQueue.main.async {
+                        self.searchResults = self.storage!.realm.resolve(football)
+                    }
+                } catch {
+                    os_log("Failed to initialize Realm for searching: %{public}@",
+                           log: .default,
+                           type: .error,
+                           String(describing: error))
+                    LoggingHelper.registerError(error, info: ["when": "Searching"])
                 }
             }
-
-            return SessionRow(viewModel: viewModel)
         }
-
-        setDisplayedRows(sessionRows, animated: animated, overridingSelectionWith: session)
     }
+
+    func setSearchResults(_ searchResults: Results<Session>?, animated: Bool, selecting session: SessionIdentifiable) {
+        _searchResults = searchResults
+        updateWith(searchResults: searchResults, animated: animated, selecting: session)
+    }
+    private var _searchResults: Results<Session>?
+    private(set) var searchResults: Results<Session>? {
+        get { return _searchResults }
+        set {
+            _searchResults = newValue
+            updateWith(searchResults: newValue, animated: true, selecting: nil)
+        }
+    }
+
+    // MARK: - UI
 
     lazy var searchController: SearchFiltersViewController = {
         return SearchFiltersViewController.loadFromStoryboard()
@@ -407,49 +453,6 @@ class SessionsTableViewController: NSViewController {
 
         return v
     }()
-
-    override func loadView() {
-        view = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: MainWindowController.defaultRect.height))
-        view.wantsLayer = true
-        view.layer?.backgroundColor = NSColor.darkWindowBackground.cgColor
-        view.widthAnchor.constraint(lessThanOrEqualToConstant: 675).isActive = true
-
-        scrollView.frame = view.bounds
-        tableView.frame = view.bounds
-
-        scrollView.widthAnchor.constraint(greaterThanOrEqualToConstant: 300).isActive = true
-
-        view.addSubview(scrollView)
-        view.addSubview(searchController.view)
-
-        searchController.view.translatesAutoresizingMaskIntoConstraints = false
-
-        scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor).isActive = true
-        scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor).isActive = true
-        scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor).isActive = true
-
-        scrollView.topAnchor.constraint(equalTo: searchController.view.bottomAnchor).isActive = true
-
-        searchController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor).isActive = true
-        searchController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor).isActive = true
-        searchController.view.topAnchor.constraint(equalTo: view.topAnchor).isActive = true
-    }
-
-    override func viewDidLoad() {
-        super.viewDidLoad()
-
-        tableView.dataSource = self
-        tableView.delegate = self
-
-        setupContextualMenu()
-
-        tableView.rx.selectedRow.map { index -> SessionViewModel? in
-            guard let index = index else { return nil }
-            guard case .session(let viewModel) = self.displayedRows[index].kind else { return nil }
-
-            return viewModel
-            }.bind(to: selectedSession).disposed(by: disposeBag)
-    }
 
     // MARK: - Contextual menu
 
@@ -587,7 +590,14 @@ class SessionsTableViewController: NSViewController {
     }
 }
 
+// MARK: - Datasource / Delegate
+
 extension SessionsTableViewController: NSTableViewDataSource, NSTableViewDelegate {
+
+    fileprivate struct Metrics {
+        static let headerRowHeight: CGFloat = 20
+        static let sessionRowHeight: CGFloat = 64
+    }
 
     private struct Constants {
         static let sessionCellIdentifier = "sessionCell"
